@@ -32,10 +32,10 @@ func (d *Downloader) Download(ctx context.Context, rawurl, outPath string) error
 	}
 
 	if parsed.Scheme == "" {
-		return errors.New("url missing scheme (use http:// or https://"
+		return errors.New("url missing scheme (use http:// or https://)")
 	} //if the URL does not have a scheme, return an error
 
-	req,err := http.NewRequestWithContext(ctx, http.MethodGet,rawurl, nil) //We use a context so that we can cancel the download whenever we want
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawurl, nil) //We use a context so that we can cancel the download whenever we want
 	if err != nil {
 		return err
 	}
@@ -44,13 +44,13 @@ func (d *Downloader) Download(ctx context.Context, rawurl, outPath string) error
 		"AppleWebKit/537.36 (KHTML, like Gecko) "+
 		"Chrome/120.0.0.0 Safari/537.36") // We set a browser like header to avoid being blocked by some websites
 
-	resp,err := d.Client.Do(req)
+	resp, err := d.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400{
+	if resp.StatusCode >= 400 {
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
@@ -143,11 +143,11 @@ func (d *Downloader) Download(ctx context.Context, rawurl, outPath string) error
 	}
 
 	// atomically move temp to dest
-	if err := os.Rename(tmpPath, destPath); err != nil {
+	if err := os.Rename(tmpPath, outPath); err != nil {
 		// fallback: copy if rename fails across filesystems
 		in, rerr := os.Open(tmpPath)
 		if rerr == nil {
-			out, werr := os.Create(destPath)
+			out, werr := os.Create(outPath)
 			if werr == nil {
 				_, _ = io.Copy(out, in)
 				out.Close()
@@ -160,7 +160,7 @@ func (d *Downloader) Download(ctx context.Context, rawurl, outPath string) error
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "\nDownloaded %s\n", destPath)
+	fmt.Fprintf(os.Stderr, "\nDownloaded %s\n", outPath)
 	return nil
 }
 
