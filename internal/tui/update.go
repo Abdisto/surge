@@ -52,6 +52,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		cmds = append(cmds, listenForActivity(m.progressChan))
 
 	case messages.DownloadCompleteMsg:
 		for _, d := range m.downloads {
@@ -62,6 +63,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		cmds = append(cmds, listenForActivity(m.progressChan))
 
 	case messages.DownloadErrorMsg:
 		for _, d := range m.downloads {
@@ -71,6 +73,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		cmds = append(cmds, listenForActivity(m.progressChan))
 
 	case messages.TickMsg:
 		cmds = append(cmds, tickCmd())
