@@ -15,6 +15,7 @@ type UIState int
 const (
 	DashboardState UIState = iota
 	InputState
+	DetailState
 )
 
 type DownloadModel struct {

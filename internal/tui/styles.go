@@ -50,4 +50,38 @@ var (
 	// Progress Styles
 	ProgressBarStyle = lipgloss.NewStyle().
 				Foreground(ColorSuccess)
+
+	// New Styles for Refactor
+	HeaderStyle = lipgloss.NewStyle().
+			Foreground(ColorText).
+			Bold(true).
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(ColorPrimary).
+			BorderBottom(true)
+
+	// Stats Style in Header
+	StatsStyle = lipgloss.NewStyle().
+			Foreground(ColorSubtext).
+			Padding(0, 1)
+
+	// Base Card Style
+	CardStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorder).
+			Padding(0, 1).
+			Margin(0, 1)
+
+	// Selected Card Style (highlighted border)
+	SelectedCardStyle = CardStyle.
+				BorderForeground(ColorSecondary)
+
+	// Text inside the card
+	CardTitleStyle = lipgloss.NewStyle().
+			Foreground(ColorPrimary).
+			Bold(true)
+
+	CardStatsStyle = lipgloss.NewStyle().
+			Foreground(ColorSubtext).
+			Italic(true)
 )

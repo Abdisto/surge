@@ -79,11 +79,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messages.TickMsg:
 		cmds = append(cmds, tickCmd())
 
-		// Also tick the progress bars if needed (they might have animations)
-		// for _, d := range m.downloads {
-		// 	 progress bars usually update on SetPercent, but some have internal unix ticks?
-		// 	 standard bubbles progress doesn't need explicit ticks unless animating independently
-		// }
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		// Re-focus inputs to trigger resize if needed (though inputs don't strictly need it here)
+		return m, nil
 
 	case tea.KeyMsg:
 		switch m.state {
@@ -109,6 +109,19 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < len(m.downloads)-1 {
 					m.cursor++
 				}
+			}
+
+			// Details
+			if msg.String() == "enter" {
+				if len(m.downloads) > 0 {
+					m.state = DetailState
+				}
+			}
+
+		case DetailState:
+			if msg.String() == "esc" || msg.String() == "q" || msg.String() == "enter" {
+				m.state = DashboardState
+				return m, nil
 			}
 
 		case InputState:
@@ -162,10 +175,6 @@ func StartDownloadCmd(sub chan tea.Msg, id int, url, path string) tea.Cmd {
 		d.SetID(id)
 
 		ctx := context.Background()
-		// We launch the download in a goroutine because tea.Cmd must return a Msg
-		// But here, the downloader sends messages to the sub channel.
-		// We don't need to return a Msg from this Cmd, the channel will handle it.
-		// Wait, tea.Cmd expects a Msg return. We can return nil/AddDownloadMsg
 
 		go func() {
 			err := d.Download(ctx, url, path, 1, false, "", "") // Concurrency restricted to 1 as per user request
