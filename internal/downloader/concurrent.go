@@ -34,6 +34,8 @@ type ConcurrentDownloader struct {
 	ProgressChan chan<- tea.Msg // Channel for events (start/complete/error)
 	ID           int            // Download ID
 	State        *ProgressState // Shared state for TUI polling
+	activeTasks  map[int]*ActiveTask
+	activeMu     sync.Mutex
 }
 
 // NewConcurrentDownloader creates a new concurrent downloader with all required parameters
@@ -42,13 +44,21 @@ func NewConcurrentDownloader(id int, progressCh chan<- tea.Msg, state *ProgressS
 		ID:           id,
 		ProgressChan: progressCh,
 		State:        state,
+		activeTasks:  make(map[int]*ActiveTask),
 	}
 }
 
 // Task represents a byte range to download
 type Task struct {
-	Offset int64
+	Offset int64 // in bytes
 	Length int64
+}
+
+// ActiveTask tracks a task currently being processed by a worker
+type ActiveTask struct {
+	Task          Task
+	CurrentOffset int64 // Atomic
+	StopAt        int64 // Atomic
 }
 
 // TaskQueue is a thread-safe work-stealing queue
@@ -302,8 +312,11 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 				if queue.IdleWorkers() > 0 && splitCount < maxSplits {
 					if queue.SplitLargestIfNeeded() {
 						splitCount++
-						if verbose {
-							fmt.Fprintf(os.Stderr, "\n[Balancer] Split task (total splits: %d)\n", splitCount)
+						utils.Debug("Balancer: split largest task (total splits: %d)", splitCount)
+					} else if queue.Len() == 0 {
+						// Try to steal from an active worker
+						if d.StealWork(queue) {
+							splitCount++
 						}
 					}
 				}
@@ -383,6 +396,9 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 	defer bufPool.Put(bufPtr)
 	buf := *bufPtr
 
+	utils.Debug("Worker %d started", id)
+	defer utils.Debug("Worker %d finished", id)
+
 	for {
 		// Get next task
 		task, ok := queue.Pop()
@@ -401,8 +417,33 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 			if attempt > 0 {
 				time.Sleep(time.Duration(1<<attempt) * retryBaseDelay) //Exponential backoff incase of failure
 			}
-			lastErr = d.downloadTask(ctx, rawurl, file, task, buf, verbose, client)
+
+			// Register active task
+			activeTask := &ActiveTask{
+				Task:          task,
+				CurrentOffset: task.Offset,
+				StopAt:        task.Offset + task.Length,
+			}
+			d.activeMu.Lock()
+			d.activeTasks[id] = activeTask
+			d.activeMu.Unlock()
+
+			taskStart := time.Now()
+			lastErr = d.downloadTask(ctx, rawurl, file, activeTask, buf, verbose, client)
+			utils.Debug("Worker %d: Task offset=%d length=%d took %v", id, task.Offset, task.Length, time.Since(taskStart))
+
+			d.activeMu.Lock()
+			delete(d.activeTasks, id)
+			d.activeMu.Unlock()
+
 			if lastErr == nil {
+				// Check if we stopped early due to stealing
+				stopAt := atomic.LoadInt64(&activeTask.StopAt)
+				current := atomic.LoadInt64(&activeTask.CurrentOffset)
+				if current < task.Offset+task.Length && current >= stopAt {
+					// We were stopped early this is expected success for the partial work
+					// The stolen part is already in the queue
+				}
 				break
 			}
 
@@ -421,6 +462,8 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 
 		if lastErr != nil {
 			// Log failed task but continue with next task
+			// If we modified StopAt we should probably reset it or push the remaining part?
+			// TODO: Could optimize by pushing only remaining part if we track that.
 			queue.Push(task)
 			utils.Debug("task at offset %d failed after %d retries: %v", task.Offset, maxTaskRetries, lastErr)
 		}
@@ -428,12 +471,18 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 }
 
 // downloadTask downloads a single byte range and writes to file at offset
-func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, file *os.File, task Task, buf []byte, verbose bool, client *http.Client) error {
+func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, file *os.File, activeTask *ActiveTask, buf []byte, verbose bool, client *http.Client) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawurl, nil)
 	if err != nil {
 		return err
 	}
 
+	task := activeTask.Task
+
+	// TODO
+	// We only request up to StopAt initially but StopAt might change during download
+	// Actually, we should request the full length to keep connection open,
+	// However, if we request full length, and stop halfway, the server might complain or we waste bandwidth?
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
 		"AppleWebKit/537.36 (KHTML, like Gecko) "+
 		"Chrome/120.0.0.0 Safari/537.36")
@@ -452,6 +501,13 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 	// Read and write at offset
 	offset := task.Offset
 	for {
+		// Check if we should stop
+		stopAt := atomic.LoadInt64(&activeTask.StopAt)
+		if offset >= stopAt {
+			// Stealing happened, stop here
+			return nil
+		}
+
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			_, writeErr := file.WriteAt(buf[:n], offset)
@@ -459,6 +515,7 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 				return fmt.Errorf("write error: %w", writeErr)
 			}
 			offset += int64(n)
+			atomic.StoreInt64(&activeTask.CurrentOffset, offset)
 
 			// Update progress via shared state only (removed duplicate tracking)
 			if d.State != nil {
@@ -474,4 +531,60 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 	}
 
 	return nil
+}
+
+// StealWork tries to split an active task from a busy worker
+func (d *ConcurrentDownloader) StealWork(queue *TaskQueue) bool {
+	d.activeMu.Lock()
+	defer d.activeMu.Unlock()
+
+	for id, active := range d.activeTasks {
+		current := atomic.LoadInt64(&active.CurrentOffset)
+		stopAt := atomic.LoadInt64(&active.StopAt)
+		remaining := stopAt - current
+
+		if remaining > 4*MB { // 4MB threshold
+			// Found a candidate
+			// Split in half
+			splitSize := remaining / 2
+			// Align to 4KB
+			splitSize = (splitSize / AlignSize) * AlignSize
+
+			if splitSize < MinChunk {
+				continue
+			}
+
+			newStopAt := current + splitSize
+
+			// Update the active task stop point
+			// TODO: There maybe a race condition here, I dont know whay to do. This whole function is dirty :(
+			atomic.StoreInt64(&active.StopAt, newStopAt)
+
+			finalCurrent := atomic.LoadInt64(&active.CurrentOffset)
+
+			// The actual start of the stolen chunk must be after where the worker effectively stops.
+			stolenStart := newStopAt
+			if finalCurrent > newStopAt {
+				stolenStart = finalCurrent
+			}
+
+			// Ensure we still have a valid chunk to steal
+			if stolenStart >= stopAt {
+				// Race condition: worker finished the whole thing before we could steal
+				continue
+			}
+
+			stolenTask := Task{
+				Offset: stolenStart,
+				Length: stopAt - stolenStart,
+			}
+
+			queue.Push(stolenTask)
+			utils.Debug("Balancer: stole %s from worker %d (new range: %d-%d)",
+				utils.ConvertBytesToHumanReadable(stolenTask.Length), id, stolenTask.Offset, stolenTask.Offset+stolenTask.Length)
+
+			return true
+		}
+	}
+	return false
 }
