@@ -1,6 +1,3 @@
-/*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -14,14 +11,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Version information - set via ldflags during build
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "surge",
-	Short: "an open-source download manager written in Go",
-	Long:  `an open-source download manager written in Go`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Use:     "surge",
+	Short:   "An open-source download manager written in Go",
+	Long:    `Surge is a fast, concurrent download manager with pause/resume support.`,
+	Version: Version,
 	Run: func(cmd *cobra.Command, args []string) {
 		p := tea.NewProgram(tui.InitialRootModel(), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
@@ -42,12 +43,7 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(getCmd)
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.surge.yaml)")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
+	// Set version template
+	rootCmd.SetVersionTemplate("Surge version {{.Version}}\n")
 }
