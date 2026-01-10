@@ -24,31 +24,47 @@ func (m RootModel) View() string {
 	// These overlays sit on top of the dashboard or replace it
 
 	if m.state == InputState {
-		labelStyle := lipgloss.NewStyle().Width(10).Foreground(ColorLightGray)
-		// Centered popup - compact layout
-		hintStyle := lipgloss.NewStyle().MarginLeft(1).Foreground(ColorLightGray) // Secondary
+		// Build the modal content
+		labelStyle := lipgloss.NewStyle().Width(12).Foreground(ColorLightGray)
+		hintStyle := lipgloss.NewStyle().Foreground(ColorLightGray)
 		if m.focusedInput == 1 {
-			hintStyle = lipgloss.NewStyle().MarginLeft(1).Foreground(ColorNeonPink) // Highlighted
+			hintStyle = lipgloss.NewStyle().Foreground(ColorNeonPink)
 		}
+
+		urlLine := lipgloss.JoinHorizontal(lipgloss.Left,
+			labelStyle.Render("URL:"),
+			m.inputs[0].View(),
+		)
+
 		pathLine := lipgloss.JoinHorizontal(lipgloss.Left,
 			labelStyle.Render("Path:"),
 			m.inputs[1].View(),
+			"  ",
 			hintStyle.Render("[Tab] Browse"),
 		)
 
-		popup := lipgloss.JoinVertical(lipgloss.Left,
-			TitleStyle.Render("ADD DOWNLOAD"),
+		filenameLine := lipgloss.JoinHorizontal(lipgloss.Left,
+			labelStyle.Render("Filename:"),
+			m.inputs[2].View(),
+		)
+
+		modalContent := lipgloss.JoinVertical(lipgloss.Left,
+			urlLine,
 			"",
-			lipgloss.JoinHorizontal(lipgloss.Left, labelStyle.Render("URL:"), m.inputs[0].View()),
 			pathLine,
-			lipgloss.JoinHorizontal(lipgloss.Left, labelStyle.Render("Filename:"), m.inputs[2].View()),
+			"",
+			filenameLine,
+			"",
 			"",
 			lipgloss.NewStyle().Foreground(ColorLightGray).Render("[Enter] Start  [Esc] Cancel"),
 		)
 
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			PaneStyle.Width(60).Padding(1, 2).Render(popup),
-		)
+		// Wrap in btop-style box - use larger width to fit content
+		innerContent := lipgloss.NewStyle().Padding(1, 2).Render(modalContent)
+		modalBox := renderBtopBox("Add Download", innerContent, 72, 13, ColorNeonPink, false)
+
+		// Center the modal
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
 	}
 
 	if m.state == FilePickerState {
@@ -86,7 +102,11 @@ func (m RootModel) View() string {
 	}
 
 	// === MAIN DASHBOARD LAYOUT ===
+	return m.renderMainDashboard()
+}
 
+// renderMainDashboard renders the main dashboard UI (used by View and as backdrop for modals)
+func (m RootModel) renderMainDashboard() string {
 	availableHeight := m.height - 2 // Margin
 	availableWidth := m.width - 4   // Margin
 
@@ -105,11 +125,11 @@ func (m RootModel) View() string {
 
 	// --- SECTION 1: HEADER & LOGO (Top Left) ---
 	logoText := `
- ██████  ██    ██ ██████   ██████  ███████ 
-██       ██    ██ ██   ██ ██       ██      
-███████  ██    ██ ██████  ██   ███ █████   
-     ██  ██    ██ ██   ██ ██    ██ ██      
-███████   ██████  ██   ██  ██████  ███████`
+   _______  ___________ ____ 
+  / ___/ / / / ___/ __ ` + "`" + `/ _ \
+ (__  ) /_/ / /  / /_/ /  __/
+/____/\__,_/_/   \__, /\___/ 
+                /____/       `
 
 	// Create the header stats
 	active, queued, downloaded := m.CalculateStats()
@@ -584,17 +604,30 @@ func renderBtopBox(title string, content string, width, height int, borderColor 
 			line = ""
 		}
 		// Pad or truncate line to fit innerWidth
-		lineWidth := lipgloss.Width(line)
-		if lineWidth < innerWidth {
-			line = line + strings.Repeat(" ", innerWidth-lineWidth)
-		} else if lineWidth > innerWidth {
-			// Truncate (simplified - just take first innerWidth chars)
-			runes := []rune(line)
-			if len(runes) > innerWidth {
-				line = string(runes[:innerWidth])
-			}
+		// Use lipgloss to handle ANSI widths correctly
+		// Note: We use Render() with Width to ensure padding is correct.
+		// We avoid text wrapping by checking width, but if it happens, we might need to handle it.
+		// However, for this UI, we expect callers to size content appropriately or accept wrapping behavior if overflowing.
+		// To define a hard limit without wrapping is tricky in pure lipgloss without Softwrap,
+		// but standard Width() behavior pads short lines which fixes the main issue.
+		// For long lines, we simply render and if it wraps, we'll visually see it, but it won't break the border alignment because
+		// we wrap the RESULT in the border.
+		// Wait - we need exactly ONE line per row to match vertical borders.
+
+		// Safe approach: render with width. If it contains newlines (wrapped), take absolute first line
+		// or ensure we don't wrap by expecting content to fit.
+		// The original bug was manual truncation of ANSI strings.
+		// We'll trust lipgloss to measure and pad.
+
+		renderedLine := lipgloss.NewStyle().Width(innerWidth).Render(line)
+
+		// If the line is too long and wraps, lipgloss returns multiline string.
+		// We must truncate it to a single line to preserve box shape.
+		if strings.Contains(renderedLine, "\n") {
+			renderedLine = strings.Split(renderedLine, "\n")[0]
 		}
-		wrappedLines = append(wrappedLines, borderStyle.Render(vertical)+line+borderStyle.Render(vertical))
+
+		wrappedLines = append(wrappedLines, borderStyle.Render(vertical)+renderedLine+borderStyle.Render(vertical))
 	}
 
 	// Combine all parts
