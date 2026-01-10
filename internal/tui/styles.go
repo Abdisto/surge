@@ -13,6 +13,12 @@ var (
 	ColorLightGray  = lipgloss.Color("#a9b1d6") // Brighter text for secondary info
 	ColorWhite      = lipgloss.Color("#f8f8f2")
 
+	// Semantic State Colors
+	ColorStateError       = lipgloss.Color("#ff5555") // 🔴 Red - Error/Stopped
+	ColorStatePaused      = lipgloss.Color("#ffb86c") // 🟡 Orange - Paused/Queued
+	ColorStateDownloading = lipgloss.Color("#50fa7b") // 🟢 Green - Downloading
+	ColorStateDone        = lipgloss.Color("#bd93f9") // 🔵 Purple - Completed
+
 	// === Layout Styles ===
 
 	// The main box surrounding everything (optional, depending on terminal size)

@@ -24,25 +24,35 @@ func (i DownloadItem) Title() string {
 func (i DownloadItem) Description() string {
 	d := i.download
 
-	// Build status indicator
-	statusIcon := "⬇"
-	status := "Downloading"
-	if d.done {
-		statusIcon = "✔"
-		status = "Completed"
-	}
-	if d.paused {
-		statusIcon = "⏸"
-		status = "Paused"
-	}
-	if d.err != nil {
+	// Build status indicator with semantic colors
+	var statusIcon, status string
+	var stateColor lipgloss.Color
+
+	switch {
+	case d.err != nil:
 		statusIcon = "✖"
 		status = "Error"
-	}
-	if !d.done && !d.paused && d.err == nil && d.Speed == 0 && d.Downloaded == 0 {
+		stateColor = ColorStateError // 🔴 Red
+	case d.done:
+		statusIcon = "✔"
+		status = "Completed"
+		stateColor = ColorStateDone // 🔵 Purple
+	case d.paused:
+		statusIcon = "⏸"
+		status = "Paused"
+		stateColor = ColorStatePaused // 🟡 Orange
+	case d.Speed == 0 && d.Downloaded == 0:
 		statusIcon = "⏳"
 		status = "Queued"
+		stateColor = ColorStatePaused // 🟡 Orange
+	default:
+		statusIcon = "⬇"
+		status = "Downloading"
+		stateColor = ColorStateDownloading // 🟢 Green
 	}
+
+	// Style the status with semantic color
+	styledStatus := lipgloss.NewStyle().Foreground(stateColor).Render(statusIcon + " " + status)
 
 	// Build progress info
 	pct := 0.0
@@ -60,7 +70,7 @@ func (i DownloadItem) Description() string {
 		speedInfo = fmt.Sprintf(" • %.2f MB/s", d.Speed/Megabyte)
 	}
 
-	return fmt.Sprintf("%s %s • %.0f%%%s • %s", statusIcon, status, pct, speedInfo, sizeInfo)
+	return fmt.Sprintf("%s • %.0f%%%s • %s", styledStatus, pct, speedInfo, sizeInfo)
 }
 
 func (i DownloadItem) FilterValue() string {

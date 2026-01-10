@@ -295,19 +295,20 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 }
 
 func getDownloadStatus(d *DownloadModel) string {
-	if d.err != nil {
-		return "Error"
+	style := lipgloss.NewStyle()
+
+	switch {
+	case d.err != nil:
+		return style.Foreground(ColorStateError).Render("✖ Error")
+	case d.done:
+		return style.Foreground(ColorStateDone).Render("✔ Completed")
+	case d.paused:
+		return style.Foreground(ColorStatePaused).Render("⏸ Paused")
+	case d.Speed == 0 && d.Downloaded == 0:
+		return style.Foreground(ColorStatePaused).Render("o Queued")
+	default:
+		return style.Foreground(ColorStateDownloading).Render("⬇ Downloading")
 	}
-	if d.paused {
-		return "Paused"
-	}
-	if d.done {
-		return "Completed"
-	}
-	if d.Speed == 0 && d.Downloaded == 0 {
-		return "Queued"
-	}
-	return "Downloading"
 }
 
 // Simple Sparkline Generator using Braille patterns
