@@ -160,6 +160,11 @@ func (p *WorkerPool) worker() {
 			if p.progressCh != nil {
 				p.progressCh <- messages.DownloadErrorMsg{DownloadID: cfg.ID, Err: err}
 			}
+			// Clean up errored download from tracking (don't save to .surge)
+			p.mu.Lock()
+			delete(p.downloads, cfg.ID)
+			p.mu.Unlock()
+
 		} else if !isPaused {
 			// Only mark as done if not paused
 			if cfg.State != nil {

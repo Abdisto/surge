@@ -409,6 +409,38 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		lipgloss.NewStyle().Foreground(ColorLightGray).Render(truncateString(d.URL, contentWidth-14)),
 	)
 
+	// For errored downloads, show error details
+	if d.err != nil {
+		errorStyle := lipgloss.NewStyle().Foreground(ColorStateError).Width(contentWidth - 4)
+		errorLabel := lipgloss.NewStyle().Foreground(ColorStateError).Bold(true).Render("Error Details")
+
+		// Word wrap the error message
+		errMsg := d.err.Error()
+
+		errorSection := lipgloss.JoinVertical(lipgloss.Left,
+			errorLabel,
+			"",
+			errorStyle.Render(errMsg),
+		)
+
+		content := lipgloss.JoinVertical(lipgloss.Left,
+			"",
+			fileInfo,
+			"",
+			divider,
+			"",
+			errorSection,
+			"",
+			divider,
+			"",
+			urlSection,
+		)
+
+		return lipgloss.NewStyle().
+			Padding(0, 2).
+			Render(content)
+	}
+
 	// For completed downloads, show simplified view
 	if d.done {
 		// Calculate average speed for completed download
