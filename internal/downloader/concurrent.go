@@ -35,15 +35,17 @@ type ConcurrentDownloader struct {
 	activeMu     sync.Mutex
 	URL          string // For pause/resume
 	DestPath     string // For pause/resume
+	Runtime      *RuntimeConfig
 }
 
 // NewConcurrentDownloader creates a new concurrent downloader with all required parameters
-func NewConcurrentDownloader(id int, progressCh chan<- tea.Msg, state *ProgressState) *ConcurrentDownloader {
+func NewConcurrentDownloader(id int, progressCh chan<- tea.Msg, state *ProgressState, runtime *RuntimeConfig) *ConcurrentDownloader {
 	return &ConcurrentDownloader{
 		ID:           id,
 		ProgressChan: progressCh,
 		State:        state,
 		activeTasks:  make(map[int]*ActiveTask),
+		Runtime:      runtime,
 	}
 }
 
@@ -202,30 +204,47 @@ func (q *TaskQueue) SplitLargestIfNeeded() bool {
 }
 
 // getInitialConnections returns the starting number of connections based on file size
-func getInitialConnections(fileSize int64) int {
+func (d *ConcurrentDownloader) getInitialConnections(fileSize int64) int {
+	maxConns := d.Runtime.GetMaxConnectionsPerHost()
+
+	var recConns int
 	switch {
 	case fileSize < 10*MB:
-		return 1
+		recConns = 1
 	case fileSize < 100*MB:
-		return 4
+		recConns = 4
 	case fileSize < 1*GB:
-		return 6
+		recConns = 6
 	default:
-		return 32
+		recConns = 32
 	}
+
+	if recConns > maxConns {
+		return maxConns
+	}
+	return recConns
 }
 
 // calculateChunkSize determines optimal chunk size
-func calculateChunkSize(fileSize int64, numConns int) int64 {
+func (d *ConcurrentDownloader) calculateChunkSize(fileSize int64, numConns int) int64 {
 	targetChunks := int64(numConns * TasksPerWorker)
 	chunkSize := fileSize / targetChunks
 
-	// Clamp to min/max
-	if chunkSize < MinChunk {
-		chunkSize = MinChunk
+	// Clamp to min/max from config
+	minChunk := d.Runtime.GetMinChunkSize()
+	maxChunk := d.Runtime.GetMaxChunkSize()
+	targetChunk := d.Runtime.GetTargetChunkSize()
+
+	// If calculating produces something wild, prefer target
+	if chunkSize == 0 {
+		chunkSize = targetChunk
 	}
-	if chunkSize > MaxChunk {
-		chunkSize = MaxChunk
+
+	if chunkSize < minChunk {
+		chunkSize = minChunk
+	}
+	if chunkSize > maxChunk {
+		chunkSize = maxChunk
 	}
 
 	// Align to 4KB
@@ -251,9 +270,9 @@ func createTasks(fileSize, chunkSize int64) []Task {
 }
 
 // newConcurrentClient creates an http.Client tuned for concurrent downloads
-func newConcurrentClient(numConns int) *http.Client {
+func (d *ConcurrentDownloader) newConcurrentClient(numConns int) *http.Client {
 	// Ensure we have enough connections per host
-	maxConns := PerHostMax
+	maxConns := d.Runtime.GetMaxConnectionsPerHost()
 	if numConns > maxConns {
 		maxConns = numConns
 	}
@@ -304,11 +323,11 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 	}
 
 	// Determine connections and chunk size
-	numConns := getInitialConnections(fileSize)
-	chunkSize := calculateChunkSize(fileSize, numConns)
+	numConns := d.getInitialConnections(fileSize)
+	chunkSize := d.calculateChunkSize(fileSize, numConns)
 
 	// Create tuned HTTP client for concurrent downloads
-	client := newConcurrentClient(numConns)
+	client := d.newConcurrentClient(numConns)
 
 	if verbose {
 		fmt.Printf("File size: %s, connections: %d, chunk size: %s\n",
@@ -494,15 +513,7 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 	// Delete state file on successful completion
 	_ = DeleteState(d.URL)
 
-	// Print final stats only if download wasn't cancelled
-	if ctx.Err() == nil {
-		elapsed := time.Since(startTime)
-		speed := float64(fileSize) / elapsed.Seconds()
-		fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%s/s)\n",
-			utils.ConvertBytesToHumanReadable(fileSize),
-			elapsed.Round(time.Millisecond),
-			utils.ConvertBytesToHumanReadable(int64(speed)))
-	}
+	// Note: Download completion notifications are handled by the TUI via DownloadCompleteMsg
 
 	return nil
 }
@@ -531,7 +542,8 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 		}
 
 		var lastErr error
-		for attempt := 0; attempt < maxTaskRetries; attempt++ {
+		maxRetries := d.Runtime.GetMaxTaskRetries()
+		for attempt := 0; attempt < maxRetries; attempt++ {
 			if attempt > 0 {
 				time.Sleep(time.Duration(1<<attempt) * retryBaseDelay) //Exponential backoff incase of failure
 			}
@@ -622,7 +634,7 @@ func (d *ConcurrentDownloader) worker(ctx context.Context, id int, rawurl string
 			// If we modified StopAt we should probably reset it or push the remaining part?
 			// TODO: Could optimize by pushing only remaining part if we track that.
 			queue.Push(task)
-			utils.Debug("task at offset %d failed after %d retries: %v", task.Offset, maxTaskRetries, lastErr)
+			utils.Debug("task at offset %d failed after %d retries: %v", task.Offset, maxRetries, lastErr)
 		}
 	}
 }
@@ -636,9 +648,7 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 
 	task := activeTask.Task
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-		"AppleWebKit/537.36 (KHTML, like Gecko) "+
-		"Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", d.Runtime.GetUserAgent())
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", task.Offset, task.Offset+task.Length-1))
 
 	resp, err := client.Do(req)
@@ -709,10 +719,11 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 				recentSpeed := float64(windowBytes) / windowElapsed
 
 				activeTask.SpeedMu.Lock()
+				alpha := d.Runtime.GetSpeedEmaAlpha()
 				if activeTask.Speed == 0 {
 					activeTask.Speed = recentSpeed
 				} else {
-					activeTask.Speed = (1-speedEMAAlpha)*activeTask.Speed + speedEMAAlpha*recentSpeed
+					activeTask.Speed = (1-alpha)*activeTask.Speed + alpha*recentSpeed
 				}
 				activeTask.SpeedMu.Unlock()
 
@@ -857,11 +868,13 @@ func (d *ConcurrentDownloader) checkWorkerHealth() {
 		taskDuration := now.Sub(active.StartTime)
 
 		// Skip workers that are still in their grace period
-		if taskDuration < slowWorkerGrace {
+		gracePeriod := d.Runtime.GetSlowWorkerGracePeriod()
+		if taskDuration < gracePeriod {
 			continue
 		}
 
 		// Check for stalled worker (no activity for stallTimeout)
+		stallTimeout := d.Runtime.GetStallTimeout()
 		lastActivity := time.Unix(0, active.LastActivity)
 		if now.Sub(lastActivity) > stallTimeout {
 			utils.Debug("Health: Worker %d stalled (no activity for %v), cancelling", workerID, now.Sub(lastActivity))
@@ -878,7 +891,8 @@ func (d *ConcurrentDownloader) checkWorkerHealth() {
 			workerSpeed := active.Speed
 			active.SpeedMu.Unlock()
 
-			isBelowThreshold := workerSpeed > 0 && workerSpeed < slowWorkerThreshold*meanSpeed
+			threshold := d.Runtime.GetSlowWorkerThreshold()
+			isBelowThreshold := workerSpeed > 0 && workerSpeed < threshold*meanSpeed
 			isBelowMinimum := workerSpeed < float64(minAbsoluteSpeed)
 
 			if isBelowThreshold && isBelowMinimum {

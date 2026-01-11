@@ -6,10 +6,15 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
+	"surge/internal/config"
 	"surge/internal/downloader"
 )
 
@@ -23,6 +28,13 @@ const (
 	HistoryState                         //HistoryState is 4
 	DuplicateWarningState                //DuplicateWarningState is 5
 	SearchState                          //SearchState is 6
+	SettingsState                        //SettingsState is 7
+)
+
+const (
+	TabQueued = 0
+	TabActive = 1
+	TabDone   = 2
 )
 
 // StartDownloadMsg is sent from the HTTP server to start a new download
@@ -36,6 +48,7 @@ type DownloadModel struct {
 	ID          int
 	URL         string
 	Filename    string
+	Destination string // Full path to the destination file
 	Total       int64
 	Downloaded  int64
 	Speed       float64
@@ -61,6 +74,7 @@ type RootModel struct {
 	width          int
 	height         int
 	state          UIState
+	activeTab      int // 0=Queued, 1=Active, 2=Done
 	inputs         []textinput.Model
 	focusedInput   int
 	progressChan   chan tea.Msg // Channel for events only (start/complete/error)
@@ -68,9 +82,11 @@ type RootModel struct {
 	// File picker for directory selection
 	filepicker filepicker.Model
 
-	// Navigation
-	cursor       int
-	scrollOffset int // First visible download index for viewport scrolling
+	// Bubbles help component
+	help help.Model
+
+	// Bubbles list component for download listing
+	list list.Model
 
 	Pool *downloader.WorkerPool //Works as the download queue
 	PWD  string
@@ -85,8 +101,23 @@ type RootModel struct {
 	pendingFilename string // Filename pending confirmation
 	duplicateInfo   string // Info about the duplicate
 
-	// Search
-	searchQuery string // Current search filter
+	// Graph Data
+	SpeedHistory           []float64 // Stores the last ~60 ticks of speed data
+	lastSpeedHistoryUpdate time.Time // Last time SpeedHistory was updated (for 0.5s sampling)
+	speedBuffer            []float64 // Buffer for rolling average (last 10 speed readings)
+
+	// Notification log system
+	logViewport viewport.Model // Scrollable log viewport
+	logEntries  []string       // Log entries for download events
+	logFocused  bool           // Whether the log viewport is focused
+
+	// Settings
+	Settings             *config.Settings // Application settings
+	SettingsActiveTab    int              // Active category tab (0-3)
+	SettingsSelectedRow  int              // Selected setting within current tab
+	SettingsIsEditing    bool             // Whether currently editing a value
+	SettingsInput        textinput.Model  // Input for editing string/int values
+	SettingsFileBrowsing bool             // Whether browsing for a directory
 }
 
 // NewDownloadModel creates a new download model with progress state and reporter
@@ -162,6 +193,34 @@ func InitialRootModel() RootModel {
 		}
 	}
 
+	// Load completed downloads from master list (for Done tab persistence)
+	if completedEntries, err := downloader.LoadCompletedDownloads(); err == nil {
+		for _, entry := range completedEntries {
+			id := len(downloads) + 1
+			dm := NewDownloadModel(id, entry.URL, entry.Filename, entry.TotalSize)
+			dm.done = true
+			dm.Downloaded = entry.TotalSize
+			dm.progress.SetPercent(1.0)
+			downloads = append(downloads, dm)
+		}
+	}
+
+	// Initialize the download list
+	downloadList := NewDownloadList(80, 20) // Default size, will be resized on WindowSizeMsg
+
+	// Initialize help
+	helpModel := help.New()
+	helpModel.Styles.ShortKey = lipgloss.NewStyle().Foreground(ColorLightGray)
+	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(ColorGray)
+
+	// Load settings from disk (or defaults)
+	settings, _ := config.LoadSettings()
+
+	// Initialize settings input for editing
+	settingsInput := textinput.New()
+	settingsInput.Width = 40
+	settingsInput.Prompt = ""
+
 	return RootModel{
 		downloads:      downloads,
 		NextDownloadID: len(downloads) + 1, // Start after loaded downloads
@@ -169,8 +228,15 @@ func InitialRootModel() RootModel {
 		state:          DashboardState,
 		progressChan:   progressChan,
 		filepicker:     fp,
+		help:           helpModel,
+		list:           downloadList,
 		Pool:           downloader.NewWorkerPool(progressChan),
 		PWD:            pwd,
+		SpeedHistory:   make([]float64, GraphHistoryPoints), // 60 points of history (30s at 0.5s interval)
+		logViewport:    viewport.New(40, 5),                 // Default size, will be resized
+		logEntries:     make([]string, 0),
+		Settings:       settings,
+		SettingsInput:  settingsInput,
 	}
 }
 
@@ -178,21 +244,32 @@ func (m RootModel) Init() tea.Cmd {
 	return listenForActivity(m.progressChan)
 }
 
-// getVisibleCount returns how many download cards can fit in the current terminal height
-func (m RootModel) getVisibleCount() int {
-	availableHeight := m.height - HeaderHeight - 2 // Reserve space for footer
-	visibleCount := availableHeight / CardHeight
-	if visibleCount < 1 {
-		visibleCount = 1
-	}
-	if visibleCount > len(m.downloads) {
-		visibleCount = len(m.downloads)
-	}
-	return visibleCount
-}
-
 func listenForActivity(sub chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		return <-sub
 	}
+}
+
+// Helper to get downloads for the current tab
+func (m RootModel) getFilteredDownloads() []*DownloadModel {
+	var filtered []*DownloadModel
+	for _, d := range m.downloads {
+		switch m.activeTab {
+		case TabQueued:
+			// Queued: not done, not actively downloading (includes paused)
+			if !d.done && d.Speed == 0 {
+				filtered = append(filtered, d)
+			}
+		case TabActive:
+			// Active: only downloads with active speed
+			if !d.done && d.Speed > 0 {
+				filtered = append(filtered, d)
+			}
+		case TabDone:
+			if d.done {
+				filtered = append(filtered, d)
+			}
+		}
+	}
+	return filtered
 }

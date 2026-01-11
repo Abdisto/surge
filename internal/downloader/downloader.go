@@ -20,15 +20,17 @@ type SingleDownloader struct {
 	ProgressChan chan<- tea.Msg // Channel for events (start/complete/error)
 	ID           int            // Download ID
 	State        *ProgressState // Shared state for TUI polling
+	Runtime      *RuntimeConfig
 }
 
 // NewSingleDownloader creates a new single-threaded downloader with all required parameters
-func NewSingleDownloader(id int, progressCh chan<- tea.Msg, state *ProgressState) *SingleDownloader {
+func NewSingleDownloader(id int, progressCh chan<- tea.Msg, state *ProgressState, runtime *RuntimeConfig) *SingleDownloader {
 	return &SingleDownloader{
 		Client:       &http.Client{Timeout: 0},
 		ProgressChan: progressCh,
 		ID:           id,
 		State:        state,
+		Runtime:      runtime,
 	}
 }
 
@@ -40,9 +42,7 @@ func (d *SingleDownloader) Download(ctx context.Context, rawurl, destPath string
 		return err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-		"AppleWebKit/537.36 (KHTML, like Gecko) "+
-		"Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", d.Runtime.GetUserAgent())
 
 	resp, err := d.Client.Do(req)
 	if err != nil {

@@ -157,6 +157,7 @@ func TUIDownload(ctx context.Context, cfg DownloadConfig) error {
 			URL:        cfg.URL,
 			Filename:   probe.Filename,
 			Total:      probe.FileSize,
+			DestPath:   destPath,
 		}
 	}
 
@@ -168,13 +169,13 @@ func TUIDownload(ctx context.Context, cfg DownloadConfig) error {
 	// Choose downloader based on probe results
 	if probe.SupportsRange && probe.FileSize > 0 {
 		utils.Debug("Using concurrent downloader")
-		d := NewConcurrentDownloader(cfg.ID, cfg.ProgressCh, cfg.State)
+		d := NewConcurrentDownloader(cfg.ID, cfg.ProgressCh, cfg.State, cfg.Runtime)
 		return d.Download(ctx, cfg.URL, destPath, probe.FileSize, cfg.Verbose)
 	}
 
 	// Fallback to single-threaded downloader
 	utils.Debug("Using single-threaded downloader")
-	d := NewSingleDownloader(cfg.ID, cfg.ProgressCh, cfg.State)
+	d := NewSingleDownloader(cfg.ID, cfg.ProgressCh, cfg.State, cfg.Runtime)
 	return d.Download(ctx, cfg.URL, destPath, probe.FileSize, probe.Filename, cfg.Verbose)
 }
 
