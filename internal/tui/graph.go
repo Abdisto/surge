@@ -14,6 +14,13 @@ type GraphStats struct {
 	DownloadTotal int64   // Total downloaded bytes
 }
 
+var graphGradient = []lipgloss.Color{
+	lipgloss.Color("#5f005f"), // Dark Purple (Bottom)
+	lipgloss.Color("#8700af"), // Medium Purple
+	lipgloss.Color("#af00d7"), // Bright Purple
+	lipgloss.Color("#ff00ff"), // Neon Pink (Top)
+}
+
 // renderMultiLineGraph creates a multi-line bar graph with grid lines.
 // The graph scales data to fill the full width.
 // data: speed history data points
@@ -22,13 +29,14 @@ type GraphStats struct {
 // color: color for the data bars
 // stats: stats to display in overlay box (pass nil to skip)
 func renderMultiLineGraph(data []float64, width, height int, maxVal float64, color lipgloss.Color, stats *GraphStats) string {
+
 	if width < 1 || height < 1 {
 		return ""
 	}
 
 	// Styles
 	gridStyle := lipgloss.NewStyle().Foreground(ColorGray)
-	barStyle := lipgloss.NewStyle().Foreground(color)
+	//barStyle := lipgloss.NewStyle().Foreground(color)
 
 	// 1. Prepare the canvas with a Grid
 	rows := make([][]string, height)
@@ -45,6 +53,18 @@ func renderMultiLineGraph(data []float64, width, height int, maxVal float64, col
 
 	// Block characters for partial fills
 	blocks := []string{" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	// Pre-calculate styles for every row to avoid re-creating them in the loop
+	rowStyles := make([]lipgloss.Style, height)
+	for y := 0; y < height; y++ {
+		// Map height 'y' to an index in graphGradient
+		// y=0 is the bottom in the loop logic below, but let's map it visually
+		colorIdx := (y * len(graphGradient)) / height
+		if colorIdx >= len(graphGradient) {
+			colorIdx = len(graphGradient) - 1
+		}
+		rowStyles[y] = lipgloss.NewStyle().Foreground(graphGradient[colorIdx])
+	}
 
 	// 2. Scale data to fill full width
 	// Each data point spans multiple columns to fill the graph
@@ -83,7 +103,9 @@ func renderMultiLineGraph(data []float64, width, height int, maxVal float64, col
 					} else {
 						char = blocks[int(rowValue)]
 					}
-					rows[rowIndex][col] = barStyle.Render(char)
+
+					// USE THE ROW STYLE HERE
+					rows[rowIndex][col] = rowStyles[y].Render(char)
 				}
 			}
 		}
