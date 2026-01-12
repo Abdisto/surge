@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -54,21 +53,20 @@ func (d *SingleDownloader) Download(ctx context.Context, rawurl, destPath string
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	// Create temp file in same directory
-	outDir := filepath.Dir(destPath)
-	tmpFile, err := os.CreateTemp(outDir, filename+".part.*")
+	// Use .surge extension for incomplete downloads
+	workingPath := destPath + IncompleteSuffix
+	outFile, err := os.Create(workingPath)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmpFile.Name()
 	closed := false
 
 	defer func() {
 		if !closed {
-			tmpFile.Close()
+			outFile.Close()
 		}
 		if err != nil {
-			os.Remove(tmpPath)
+			os.Remove(workingPath)
 		}
 	}()
 
@@ -81,7 +79,7 @@ func (d *SingleDownloader) Download(ctx context.Context, rawurl, destPath string
 	for {
 		nr, er := resp.Body.Read(buf)
 		if nr > 0 {
-			nw, ew := tmpFile.Write(buf[0:nr])
+			nw, ew := outFile.Write(buf[0:nr])
 			if nw > 0 {
 				written += int64(nw)
 				if d.State != nil {
@@ -109,10 +107,10 @@ func (d *SingleDownloader) Download(ctx context.Context, rawurl, destPath string
 		return fmt.Errorf("copy failed: %w", err)
 	}
 
-	if err = tmpFile.Sync(); err != nil {
+	if err = outFile.Sync(); err != nil {
 		return err
 	}
-	if err = tmpFile.Close(); err != nil {
+	if err = outFile.Close(); err != nil {
 		return err
 	}
 	closed = true
@@ -125,9 +123,9 @@ func (d *SingleDownloader) Download(ctx context.Context, rawurl, destPath string
 		utils.ConvertBytesToHumanReadable(int64(speed*1024)),
 	)
 
-	// Rename temp file to final destination
-	if renameErr := os.Rename(tmpPath, destPath); renameErr != nil {
-		if in, rerr := os.Open(tmpPath); rerr == nil {
+	// Rename .surge file to final destination
+	if renameErr := os.Rename(workingPath, destPath); renameErr != nil {
+		if in, rerr := os.Open(workingPath); rerr == nil {
 			defer in.Close()
 			if out, werr := os.Create(destPath); werr == nil {
 				defer out.Close()
@@ -140,7 +138,7 @@ func (d *SingleDownloader) Download(ctx context.Context, rawurl, destPath string
 		} else {
 			return rerr
 		}
-		os.Remove(tmpPath)
+		os.Remove(workingPath)
 	}
 
 	return nil
