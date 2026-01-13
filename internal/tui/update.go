@@ -471,6 +471,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								ID:         d.ID,
 								Filename:   d.Filename,
 								Verbose:    false,
+								IsResume:   true, // Explicit resume - use saved state
 								ProgressCh: m.progressChan,
 								State:      d.state,
 								Runtime:    convertRuntimeConfig(m.Settings.ToRuntimeConfig()),
@@ -891,18 +892,31 @@ func (m *RootModel) generateUniqueFilename(dir, filename string) string {
 			// Don't check against completed downloads in the list,
 			// as we rely on filesystem check for those.
 			// But do check active/queued ones to avoid collision before file is created.
-			if !d.done && d.Filename == name {
-				return true
+			if !d.done {
+				// Check by Filename (set via DownloadStartedMsg)
+				if d.Filename == name {
+					return true
+				}
+				// Also check by Destination path basename (set earlier, more reliable)
+				if d.Destination != "" && filepath.Base(d.Destination) == name {
+					return true
+				}
 			}
 		}
 		return false
 	}
 
-	// Check if file exists on disk
+	// Check if file exists on disk (including incomplete .surge files)
 	existsOnDisk := func(name string) bool {
 		path := filepath.Join(dir, name)
-		_, err := os.Stat(path)
-		return !os.IsNotExist(err)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			return true
+		}
+		// Also check for incomplete download file (.surge extension)
+		if _, err := os.Stat(path + downloader.IncompleteSuffix); !os.IsNotExist(err) {
+			return true
+		}
+		return false
 	}
 
 	if !existsInDownloads(filename) && !existsOnDisk(filename) {

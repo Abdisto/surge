@@ -56,6 +56,7 @@ type DownloadConfig struct {
 	ID         string
 	Filename   string
 	Verbose    bool
+	IsResume   bool // True if this is explicitly a resume, not a fresh download
 	ProgressCh chan<- tea.Msg
 	State      *ProgressState
 	Runtime    *RuntimeConfig // Dynamic settings from user config
