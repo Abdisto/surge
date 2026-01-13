@@ -12,6 +12,7 @@ import (
 	"surge/internal/messages"
 	"surge/internal/utils"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
@@ -355,35 +356,41 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch m.state {
 		case DashboardState:
-			// Tab switching with Q/W/E
-			if msg.String() == "q" {
+			// Tab switching
+			if key.Matches(msg, m.keys.Dashboard.TabQueued) {
 				m.activeTab = TabQueued
 				m.ManualTabSwitch = true
 				m.updateListTitle()
 				m.UpdateListItems()
 				return m, nil
 			}
-			if msg.String() == "w" {
+			if key.Matches(msg, m.keys.Dashboard.TabActive) {
 				m.activeTab = TabActive
 				m.ManualTabSwitch = true
 				m.updateListTitle()
 				m.UpdateListItems()
 				return m, nil
 			}
-			if msg.String() == "e" {
+			if key.Matches(msg, m.keys.Dashboard.TabDone) {
 				m.activeTab = TabDone
 				m.ManualTabSwitch = true
 				m.updateListTitle()
 				m.UpdateListItems()
 				return m, nil
 			}
-			// Ctrl+Q to quit
-			if msg.String() == "ctrl+q" || msg.String() == "ctrl+c" {
+			// Quit
+			if key.Matches(msg, m.keys.Dashboard.Quit) {
 				// Graceful shutdown: pause all active downloads to save state
 				m.Pool.PauseAll()
 				return m, tea.Quit
 			}
-			if msg.String() == "a" {
+			if key.Matches(msg, m.keys.Dashboard.ForceQuit) {
+				m.Pool.PauseAll()
+				return m, tea.Quit
+			}
+
+			// Add download
+			if key.Matches(msg, m.keys.Dashboard.Add) {
 				m.state = InputState
 				m.focusedInput = 0
 				m.inputs[0].SetValue("")
@@ -399,15 +406,18 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputs[2].Blur()
 				return m, nil
 			}
-			if msg.String() == "tab" {
+
+			// Next Tab
+			if key.Matches(msg, m.keys.Dashboard.NextTab) {
 				m.activeTab = (m.activeTab + 1) % 3
 				m.ManualTabSwitch = true
 				m.updateListTitle()
 				m.UpdateListItems()
 				return m, nil
 			}
-			// Delete download with D or X
-			if msg.String() == "d" || msg.String() == "x" {
+
+			// Delete download
+			if key.Matches(msg, m.keys.Dashboard.Delete) {
 				// Don't process delete if list is filtering
 				if m.list.FilterState() == list.Filtering {
 					// Fall through to let list handle it
@@ -447,7 +457,9 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
-			if msg.String() == "h" {
+
+			// History
+			if key.Matches(msg, m.keys.Dashboard.History) {
 				// Open history view
 				if entries, err := downloader.LoadCompletedDownloads(); err == nil {
 					m.historyEntries = entries
@@ -458,7 +470,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Pause/Resume toggle - get selected download from list
-			if msg.String() == "p" {
+			if key.Matches(msg, m.keys.Dashboard.Pause) {
 				if d := m.GetSelectedDownload(); d != nil {
 					if !d.done {
 						if d.paused {
@@ -496,14 +508,14 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 			}
 
-			// Toggle log focus with L
-			if msg.String() == "l" {
+			// Toggle log focus
+			if key.Matches(msg, m.keys.Dashboard.Log) {
 				m.logFocused = !m.logFocused
 				return m, nil
 			}
 
-			// Open settings with S
-			if msg.String() == "s" {
+			// Open settings
+			if key.Matches(msg, m.keys.Dashboard.Settings) {
 				m.state = SettingsState
 				m.SettingsActiveTab = 0
 				m.SettingsSelectedRow = 0
@@ -513,20 +525,23 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// If log is focused, handle viewport scrolling
 			if m.logFocused {
-				switch msg.String() {
-				case "esc":
+				if key.Matches(msg, m.keys.Dashboard.LogClose) {
 					m.logFocused = false
 					return m, nil
-				case "j", "down":
+				}
+				if key.Matches(msg, m.keys.Dashboard.LogDown) {
 					m.logViewport.LineDown(1)
 					return m, nil
-				case "k", "up":
+				}
+				if key.Matches(msg, m.keys.Dashboard.LogUp) {
 					m.logViewport.LineUp(1)
 					return m, nil
-				case "g":
+				}
+				if key.Matches(msg, m.keys.Dashboard.LogTop) {
 					m.logViewport.GotoTop()
 					return m, nil
-				case "G":
+				}
+				if key.Matches(msg, m.keys.Dashboard.LogBottom) {
 					m.logViewport.GotoBottom()
 					return m, nil
 				}
@@ -546,18 +561,18 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case InputState:
-			if msg.String() == "esc" {
+			if key.Matches(msg, m.keys.Input.Esc) {
 				m.state = DashboardState
 				return m, nil
 			}
 			// Tab to open file picker when on path input
-			if msg.String() == "tab" && m.focusedInput == 1 {
+			if key.Matches(msg, m.keys.Input.Tab) && m.focusedInput == 1 {
 				m.state = FilePickerState
 				// Reset filepicker to current directory
 				m.filepicker.CurrentDirectory = m.PWD
 				return m, m.filepicker.Init()
 			}
-			if msg.String() == "enter" {
+			if key.Matches(msg, m.keys.Input.Enter) {
 				// Navigate through inputs: URL -> Path -> Filename -> Start
 				if m.focusedInput < 2 {
 					m.inputs[m.focusedInput].Blur()
@@ -599,13 +614,13 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Up/Down navigation between inputs
-			if msg.String() == "up" && m.focusedInput > 0 {
+			if key.Matches(msg, m.keys.Input.Up) && m.focusedInput > 0 {
 				m.inputs[m.focusedInput].Blur()
 				m.focusedInput--
 				m.inputs[m.focusedInput].Focus()
 				return m, nil
 			}
-			if msg.String() == "down" && m.focusedInput < 2 {
+			if key.Matches(msg, m.keys.Input.Down) && m.focusedInput < 2 {
 				m.inputs[m.focusedInput].Blur()
 				m.focusedInput++
 				m.inputs[m.focusedInput].Focus()
@@ -617,7 +632,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case FilePickerState:
-			if msg.String() == "esc" {
+			if key.Matches(msg, m.keys.FilePicker.Cancel) {
 				// Cancel and return to appropriate state
 				if m.SettingsFileBrowsing {
 					m.SettingsFileBrowsing = false
@@ -629,14 +644,14 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// H key to jump to Downloads folder
-			if msg.String() == "h" || msg.String() == "H" {
+			if key.Matches(msg, m.keys.FilePicker.GotoHome) {
 				homeDir, _ := os.UserHomeDir()
 				m.filepicker.CurrentDirectory = filepath.Join(homeDir, "Downloads")
 				return m, m.filepicker.Init()
 			}
 
 			// '.' to select current directory
-			if msg.String() == "." {
+			if key.Matches(msg, m.keys.FilePicker.UseDir) {
 				if m.SettingsFileBrowsing {
 					m.Settings.General.DefaultDownloadDir = m.filepicker.CurrentDirectory
 					m.SettingsFileBrowsing = false
@@ -669,23 +684,23 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case HistoryState:
-			if msg.String() == "esc" || msg.String() == "q" {
+			if key.Matches(msg, m.keys.History.Close) {
 				m.state = DashboardState
 				return m, nil
 			}
-			if msg.String() == "up" || msg.String() == "k" {
+			if key.Matches(msg, m.keys.History.Up) {
 				if m.historyCursor > 0 {
 					m.historyCursor--
 				}
 				return m, nil
 			}
-			if msg.String() == "down" || msg.String() == "j" {
+			if key.Matches(msg, m.keys.History.Down) {
 				if m.historyCursor < len(m.historyEntries)-1 {
 					m.historyCursor++
 				}
 				return m, nil
 			}
-			if msg.String() == "d" || msg.String() == "x" {
+			if key.Matches(msg, m.keys.History.Delete) {
 				if m.historyCursor >= 0 && m.historyCursor < len(m.historyEntries) {
 					entry := m.historyEntries[m.historyCursor]
 					_ = downloader.RemoveFromMasterList(entry.URLHash)
@@ -699,17 +714,17 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case DuplicateWarningState:
-			if msg.String() == "c" || msg.String() == "C" {
+			if key.Matches(msg, m.keys.Duplicate.Continue) {
 				// Continue anyway - startDownload handles unique filename generation
 				m.state = DashboardState
 				return m.startDownload(m.pendingURL, m.pendingPath, m.pendingFilename)
 			}
-			if msg.String() == "x" || msg.String() == "X" || msg.String() == "esc" {
+			if key.Matches(msg, m.keys.Duplicate.Cancel) {
 				// Cancel - don't add
 				m.state = DashboardState
 				return m, nil
 			}
-			if msg.String() == "f" || msg.String() == "F" {
+			if key.Matches(msg, m.keys.Duplicate.Focus) {
 				// Focus existing download - find it and select in list
 				for i, d := range m.getFilteredDownloads() {
 					if d.URL == m.pendingURL {
@@ -723,7 +738,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case ExtensionConfirmationState:
-			if msg.String() == "y" || msg.String() == "Y" {
+			if key.Matches(msg, m.keys.Extension.Yes) {
 				// Confirmed - proceed to add (checking for duplicates first)
 				if d := m.checkForDuplicate(m.pendingURL); d != nil {
 					utils.Debug("Duplicate download detected after confirmation: %s", m.pendingURL)
@@ -736,7 +751,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = DashboardState
 				return m.startDownload(m.pendingURL, m.pendingPath, m.pendingFilename)
 			}
-			if msg.String() == "n" || msg.String() == "N" || msg.String() == "esc" {
+			if key.Matches(msg, m.keys.Extension.No) {
 				// Cancelled
 				m.state = DashboardState
 				return m, nil
@@ -746,80 +761,101 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case SettingsState:
 			// Handle editing mode first
 			if m.SettingsIsEditing {
-				switch msg.String() {
-				case "esc":
+				if key.Matches(msg, m.keys.SettingsEditor.Cancel) {
 					// Cancel editing
 					m.SettingsIsEditing = false
 					m.SettingsInput.Blur()
 					return m, nil
-				case "enter":
+				}
+				if key.Matches(msg, m.keys.SettingsEditor.Confirm) {
 					// Commit the value
 					categories := config.CategoryOrder()
 					currentCategory := categories[m.SettingsActiveTab]
-					key := m.getCurrentSettingKey()
-					m.setSettingValue(currentCategory, key, m.SettingsInput.Value())
+					settingKey := m.getCurrentSettingKey()
+					m.setSettingValue(currentCategory, settingKey, m.SettingsInput.Value())
 					m.SettingsIsEditing = false
 					m.SettingsInput.Blur()
 					return m, nil
-				default:
-					// Pass to text input
-					var cmd tea.Cmd
-					m.SettingsInput, cmd = m.SettingsInput.Update(msg)
-					return m, cmd
 				}
+
+				// Pass to text input
+				var cmd tea.Cmd
+				m.SettingsInput, cmd = m.SettingsInput.Update(msg)
+				return m, cmd
 			}
 
 			// Not editing - handle navigation
-			switch msg.String() {
-			case "esc":
+			if key.Matches(msg, m.keys.Settings.Close) {
 				// Save settings and exit
 				_ = config.SaveSettings(m.Settings)
 				m.state = DashboardState
 				return m, nil
-			case "1":
+			}
+			if key.Matches(msg, m.keys.Settings.Tab1) {
 				m.SettingsActiveTab = 0
 				m.SettingsSelectedRow = 0
 				return m, nil
-			case "2":
+			}
+			if key.Matches(msg, m.keys.Settings.Tab2) {
 				m.SettingsActiveTab = 1
 				m.SettingsSelectedRow = 0
 				return m, nil
-			case "3":
+			}
+			if key.Matches(msg, m.keys.Settings.Tab3) {
 				m.SettingsActiveTab = 2
 				m.SettingsSelectedRow = 0
 				return m, nil
-			case "4":
+			}
+			if key.Matches(msg, m.keys.Settings.Tab4) {
 				m.SettingsActiveTab = 3
 				m.SettingsSelectedRow = 0
 				return m, nil
-			case "tab":
-				// Open file browser for default_download_dir, otherwise switch category
-				key := m.getCurrentSettingKey()
-				if key == "default_download_dir" {
+			}
+
+			// Tab Navigation
+			if key.Matches(msg, m.keys.Settings.NextTab) {
+				m.SettingsActiveTab = (m.SettingsActiveTab + 1) % 4
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Settings.PrevTab) {
+				m.SettingsActiveTab = (m.SettingsActiveTab - 1 + 4) % 4
+				m.SettingsSelectedRow = 0
+				return m, nil
+			}
+
+			// Open file browser for default_download_dir
+			if key.Matches(msg, m.keys.Settings.Browse) {
+				settingKey := m.getCurrentSettingKey()
+				if settingKey == "default_download_dir" {
 					m.SettingsFileBrowsing = true
 					m.state = FilePickerState
 					m.filepicker.CurrentDirectory = m.Settings.General.DefaultDownloadDir
 					return m, m.filepicker.Init()
 				}
-				m.SettingsActiveTab = (m.SettingsActiveTab + 1) % 4
-				m.SettingsSelectedRow = 0
 				return m, nil
-			case "shift+tab":
-				m.SettingsActiveTab = (m.SettingsActiveTab + 3) % 4
-				m.SettingsSelectedRow = 0
-				return m, nil
-			case "up", "k":
+			}
+
+			// Back tab - not currently bound, ignoring or could use Shift+Tab manual check if really needed
+			// For now, we rely on Tab (Browse) to cycle.
+
+			// Up/Down navigation
+			if key.Matches(msg, m.keys.Settings.Up) {
 				if m.SettingsSelectedRow > 0 {
 					m.SettingsSelectedRow--
 				}
 				return m, nil
-			case "down", "j":
+			}
+			if key.Matches(msg, m.keys.Settings.Down) {
 				maxRow := m.getSettingsCount() - 1
 				if m.SettingsSelectedRow < maxRow {
 					m.SettingsSelectedRow++
 				}
 				return m, nil
-			case "enter":
+			}
+
+			// Edit / Toggle
+			if key.Matches(msg, m.keys.Settings.Edit) {
 				key := m.getCurrentSettingKey()
 				// Prevent editing ignored settings
 				if key == "max_global_connections" {
@@ -843,7 +879,10 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.SettingsInput.Focus()
 				}
 				return m, nil
-			case "r", "R":
+			}
+
+			// Reset
+			if key.Matches(msg, m.keys.Settings.Reset) {
 				key := m.getCurrentSettingKey()
 				if key == "max_global_connections" {
 					return m, nil
@@ -855,11 +894,10 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentCategory := categories[m.SettingsActiveTab]
 				m.resetSettingToDefault(currentCategory, key, defaults)
 				return m, nil
-
 			}
+
 			return m, nil
 		}
-
 	}
 
 	// Propagate messages to progress bars - only update visible ones for performance

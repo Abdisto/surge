@@ -8,46 +8,8 @@ import (
 
 	"surge/internal/config"
 
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 )
-
-// SettingsKeyMap defines the keybindings for the settings view
-type SettingsKeyMap struct {
-	Edit  key.Binding
-	Reset key.Binding
-	Tabs  key.Binding
-	Save  key.Binding
-}
-
-var SettingsKeys = SettingsKeyMap{
-	Edit: key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "edit"),
-	),
-	Reset: key.NewBinding(
-		key.WithKeys("r", "R"),
-		key.WithHelp("r", "reset"),
-	),
-	Tabs: key.NewBinding(
-		key.WithKeys("1", "2", "3", "4"),
-		key.WithHelp("1-4", "tabs"),
-	),
-	Save: key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "save"),
-	),
-}
-
-// ShortHelp returns keybindings to show in the mini help view
-func (k SettingsKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Edit, k.Reset, k.Tabs, k.Save}
-}
-
-// FullHelp returns keybindings for the expanded help view
-func (k SettingsKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Edit, k.Reset, k.Tabs, k.Save}}
-}
 
 // viewSettings renders the Btop-style settings page
 func (m RootModel) viewSettings() string {
@@ -180,7 +142,7 @@ func (m RootModel) viewSettings() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Top, listBox, rightBox)
 
 	// === HELP TEXT using Bubbles help ===
-	helpText := m.help.View(SettingsKeys)
+	helpText := m.help.View(m.keys.Settings)
 
 	// === FINAL ASSEMBLY ===
 	fullContent := lipgloss.JoinVertical(lipgloss.Left,

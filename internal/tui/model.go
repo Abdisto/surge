@@ -123,6 +123,9 @@ type RootModel struct {
 	// Selection persistence
 	SelectedDownloadID string // ID of the currently selected download
 	ManualTabSwitch    bool   // Whether the last tab switch was manual
+
+	// Keybindings
+	keys KeyMap
 }
 
 // NewDownloadModel creates a new download model with progress state and reporter
@@ -241,6 +244,7 @@ func InitialRootModel() RootModel {
 		logEntries:    make([]string, 0),
 		Settings:      settings,
 		SettingsInput: settingsInput,
+		keys:          Keys,
 	}
 }
 

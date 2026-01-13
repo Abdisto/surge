@@ -47,7 +47,7 @@ func (m RootModel) View() string {
 			"", // Bottom spacer
 			"",
 			// Render dynamic help
-			m.help.View(InputKeys),
+			m.help.View(m.keys.Input),
 		)
 
 		// Apply padding to the content before boxing it
@@ -65,7 +65,7 @@ func (m RootModel) View() string {
 			"",
 			m.filepicker.View(),
 			"",
-			m.help.View(FilePickerKeys),
+			m.help.View(m.keys.FilePicker),
 		)
 
 		paddedContent := lipgloss.NewStyle().Padding(0, 2).Render(pickerContent)
@@ -379,7 +379,7 @@ func (m RootModel) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
 
 	// Footer - just keybindings
-	footer := lipgloss.NewStyle().Foreground(ColorLightGray).Padding(0, 1).Render(" [Q/W/E] Tabs  [A] Add  [P] Pause  [X] Delete  [S] Settings  [L] Log  [Ctrl+Q] Quit")
+	footer := lipgloss.NewStyle().Padding(0, 1).Render(m.help.View(m.keys.Dashboard))
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		body,
