@@ -44,7 +44,7 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/surge-downloader/surge"
-    description: "Surge is an open-source download manager"
+    description: "Surge is a blazing fast, open-source terminal (TUI) download manager built in Go."
     license: "MIT"
     hooks:
       post:

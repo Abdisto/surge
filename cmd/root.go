@@ -30,7 +30,7 @@ var serverProgram *tea.Program
 var rootCmd = &cobra.Command{
 	Use:     "surge",
 	Short:   "An open-source download manager written in Go",
-	Long:    `Surge is a fast, concurrent download manager with pause/resume support.`,
+	Long:    `Surge is a blazing fast, open-source terminal (TUI) download manager built in Go.`,
 	Version: Version,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Find an available port starting from default
