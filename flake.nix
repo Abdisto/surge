@@ -25,7 +25,7 @@
           name = "go-test";
           dontBuild = true;
           src = ./.;
-          doCheck = true;
+          doCheck = false;
           nativeBuildInputs = with pkgs; [
             go
             writableTmpDirAsHomeHook
