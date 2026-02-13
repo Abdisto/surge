@@ -19,5 +19,6 @@ buildGoApplication {
   pwd = ./.;
   src = ./.;
   modules = ./gomod2nix.toml;
-  doCheck = false;
+
+  nativeBuildInputs = [ pkgs.writableTmpDirAsHomeHook ];
 }
